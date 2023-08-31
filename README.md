@@ -3,10 +3,17 @@
 A basic marketplace platform which allows users to ‘buy’ and ‘sell’ items. Carousell offline assignment.
 
 ## Running the application
+
 ```
-docker build -t go-cli-app .
-docker-compose up
-docker-compose run --rm app-node
+./run.sh
+```
+
+## Running without Docker
+
+Must ensure that DynamoDB local is running on port 8000.
+
+```
+go run main.go
 ```
 
 # Application Design
@@ -50,26 +57,32 @@ Simply "Registered => authorized". Authentication is performed on each operation
 - CreateListing(username string, title string, description string, price int, category string)
 - DeleteListing(username string, listingId string)
 - GetListing(username string, listingId string)
-- GetListingsByCategory(username string, category string, sortBy enum.SortBy, sortOrder enum.SortOrder)
+- GetListingsByCategory(category string, sortBy enum.SortBy, sortOrder enum.SortOrder)
     - SortBy: Price, CreationTime
 - GetTopCategory()
     - Get the top category across with the most listings, across all users.
 
 ### Data Schema
 
-price is stored as int to simplify (since it is fixed at 2 decimal). It is assumed that the price is in cents.
-Creation time is stored as Epoch Seconds to simplify.
+Price is stored as int to simplify (since it is fixed at 2 decimal). It is assumed that the price is in cents.
+CreatedAt is stored as Epoch Seconds to simplify.
 
 #### Listing table
 
 This table consists of three types of records:
 
 1. User root record
+
    partition key: Username
+
    sort key: `#ROOT`
+
 2. Listing record
+
    partition key: Username
+
    sort key: ListingId
+
    attributes:
     - Title
     - Description
@@ -77,16 +90,29 @@ This table consists of three types of records:
     - Category
     - CreatedAt
 3. Category Metric Record
+
    partition key: `#CATEGORY_COUNT`
+
    sort key: Category
+
    attributes:
     - CategoryCount
 
 LSIs:
 
-- CategoryCount
-- Price
-- CreatedAt
+partition key: Username
+
+sort key: CategoryCount
+
+GSIs:
+
+1. partition key: Category 
+   
+   sort key: Price
+
+2. partition key: Category
+
+   sort key: CreatedAt
 
 ##### Use Cases
 
@@ -99,18 +125,21 @@ LSIs:
 
 ### Scaling consideration
 
-extended use-case can be supported by:
+##### Data scaling
+This is a barebone application. Additional use-case can be extended by:
 
 1. Additional indexing: easily added via LSI or GSI in DDB.
 2. Additional attributes: easily added to DDB without downtime.
 
 NoSQL is not designed for OLAP use-cases, but can be extended to supported advanced queries
 with [Amazon EMR integration](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/EMRforDynamoDB.Querying.html).
+
 For heavy OLAP use-cases, consider integrating with Amazon Redshift or migrate to a relational database.
 
-Network and compute scaling:
+##### Network and compute scaling
 Long-running server can be added to handle the load, in which ECS+Fargate fronted by Application Load Balancer can be
 used.
+
 Serverless solution like API-Gateway + Lambda is cost-effective, but with its own set of limitations.
 It is assumed Managed-DynamoDB will be used, which will scale automatically.
 
@@ -122,5 +151,7 @@ Attack vectors to consider:
 - DDOS attack
 
 Proper OAUTH should be used for production. Consider implementing a proper auth server like Auth0.
+
 API-Gateway has built-in DDOS protection, and can be configured to block IP addresses that are attacking.
+
 If long-running compute solution is chosen, Application Load Balancer can be used to protect against DDOS.

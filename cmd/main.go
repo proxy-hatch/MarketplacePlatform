@@ -3,9 +3,8 @@ package main
 import (
     "bufio"
     "fmt"
-    "github.com/aws/aws-sdk-go/aws"
-    "github.com/aws/aws-sdk-go/aws/session"
     "go.uber.org/zap"
+    "marketplace-platform/pkg/data/dynamo"
     "marketplace-platform/pkg/logger"
     "os"
     "os/signal"
@@ -16,13 +15,20 @@ import (
 func main() {
     log := logger.NewLogger()
 
-    // awsSession :=
-    session.Must(session.NewSession(&aws.Config{
-        Region:   aws.String("eu-west-1"),
-        Endpoint: aws.String("http://dynamodb-local:8000"),
-    }))
+    dao := dynamo.NewDynamoDataAccess(log)
 
-    // Create a new DynamoDB service client
+    _, err := dao.CreateListingTable()
+    if err != nil {
+        log.Fatalf("Error creating Listing table: %v", err)
+        return
+    }
+
+    exists, err := dao.ListingTableExists()
+    if err != nil {
+        log.Fatalf("Error checking if listing table exists: %v", err)
+        return
+    }
+    log.Info("Listing table exists: ", exists)
 
     // Create a channel to receive the SIGTERM signal
     c := make(chan os.Signal, 1)
@@ -73,7 +79,7 @@ func main() {
             deleteListing(args[1:])
         default:
             log.Error("Unknown command", zap.String("command", args[0]))
-            // fmt.Println("Unknown command", args[0])
+            fmt.Println("Unknown command", args[0])
         }
     }
 }
