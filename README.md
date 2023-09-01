@@ -19,17 +19,11 @@ go run main.go
 # Application Design
 
 ## Requirements
-
-### In Scope
-
 - Username and list ID are unique and case insensitive.
+- listing ID is sequential starting from 100001.
 - Only registered users should be allowed to buy or sell items.
 - Each listing can be associated with only 1 user and 1 category.
 - Category reads can be sorted on Price or creation time.
-
-### Not In Scope
-
-- sequential userID and listID. It is assumed that it is not required as it only appears in example.
 
 ## Engineering Design
 
@@ -53,10 +47,9 @@ Simply "Registered => authorized". Authentication is performed on each operation
 ### API Design
 
 - Register(username string)
-
 - CreateListing(username string, title string, description string, price int, category string)
 - DeleteListing(username string, listingId string)
-- GetListing(username string, listingId string)
+- GetListing(listingId string)
 - GetListingsByCategory(category string, sortBy enum.SortBy, sortOrder enum.SortOrder)
     - SortBy: Price, CreationTime
 - GetTopCategory()
@@ -73,15 +66,15 @@ This table consists of three types of records:
 
 1. User root record
 
-   partition key: Username
+   partition key: `#USER_ROOT`
 
-   sort key: `#ROOT`
+   sort key: Username
 
 2. Listing record
 
-   partition key: Username
+   partition key: ListingId
 
-   sort key: ListingId
+   sort key: Username
 
    attributes:
     - Title
@@ -91,7 +84,7 @@ This table consists of three types of records:
     - CreatedAt
 3. Category Metric Record
 
-   partition key: `#CATEGORY_COUNT`
+   partition key: `#CATEGORY_METRIC`
 
    sort key: Category
 
@@ -100,9 +93,11 @@ This table consists of three types of records:
 
 LSIs:
 
-partition key: Username
+partition key: ListingId
 
 sort key: CategoryCount
+
+(To be used for GetTopCategory. Only partition key used will be `#CATEGORY_METRIC`)
 
 GSIs:
 
@@ -113,6 +108,12 @@ GSIs:
 2. partition key: Category
 
    sort key: CreatedAt
+
+3. partition key: `1`
+
+   sort key: listingId
+
+   (To be used for generating listingId)
 
 ##### Use Cases
 

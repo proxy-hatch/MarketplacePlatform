@@ -1,56 +1,19 @@
-package dynamo
+package ddb
 
 import (
     "context"
     "errors"
     "github.com/aws/aws-sdk-go-v2/aws"
-    "github.com/aws/aws-sdk-go-v2/config"
     "github.com/aws/aws-sdk-go-v2/service/dynamodb"
     "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-    "go.uber.org/zap"
+    "marketplace-platform/pkg/constant"
     "time"
 )
 
-type DynamoDataAccess struct {
-    client *dynamodb.Client
-    log    *zap.SugaredLogger
-}
-
-var (
-    tableName              = "Listing"
-    CategoryPriceIndex     = "CategoryPriceIndex"
-    CategoryCreatedAtIndex = "CategoryCreatedAtIndex"
-    CategoryCountIndex     = "CategoryCountIndex"
-)
-
-func NewDynamoDataAccess(log *zap.SugaredLogger) DynamoDataAccess {
-    // Create a custom configuration
-    cfg, err := config.LoadDefaultConfig(context.TODO(),
-        config.WithRegion("eu-west-1"),
-        config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(
-            func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-                return aws.Endpoint{URL: "http://localhost:8000",
-                    SigningRegion: "eu-west-1",
-                }, nil
-            })),
-    )
-    if err != nil {
-        log.Fatalf("unable to load SDK config, %v", err)
-    }
-
-    // Create a DynamoDB client
-    client := dynamodb.NewFromConfig(cfg)
-
-    return DynamoDataAccess{
-        client: client,
-        log:    log,
-    }
-}
-
-// TableExists determines whether the Listing table exists
+// ListingTableExists checks if the Listing table exists
 func (d DynamoDataAccess) ListingTableExists() (bool, error) {
     _, err := d.client.DescribeTable(
-        context.TODO(), &dynamodb.DescribeTableInput{TableName: aws.String(tableName)},
+        context.TODO(), &dynamodb.DescribeTableInput{TableName: aws.String(constant.TableName)},
     )
     if err != nil {
         var notFoundEx *types.ResourceNotFoundException
@@ -74,10 +37,10 @@ func (d DynamoDataAccess) CreateListingTable() (*types.TableDescription, error) 
 
     table, err := d.client.CreateTable(context.TODO(), &dynamodb.CreateTableInput{
         AttributeDefinitions: []types.AttributeDefinition{{
-            AttributeName: aws.String("Username"),
-            AttributeType: types.ScalarAttributeTypeS,
+            AttributeName: aws.String(constant.ListingTablePartitionKeyName),
+            AttributeType: types.ScalarAttributeTypeN,
         }, {
-            AttributeName: aws.String("ListingId"),
+            AttributeName: aws.String(constant.ListingTableSortKeyName),
             AttributeType: types.ScalarAttributeTypeS,
         }, {
             AttributeName: aws.String("Category"),
@@ -91,20 +54,23 @@ func (d DynamoDataAccess) CreateListingTable() (*types.TableDescription, error) 
         }, {
             AttributeName: aws.String("CreatedAt"),
             AttributeType: types.ScalarAttributeTypeN,
+        }, {
+            AttributeName: aws.String(constant.ListingIdIndexPartitionKeyName),
+            AttributeType: types.ScalarAttributeTypeN,
         }},
 
         KeySchema: []types.KeySchemaElement{{
-            AttributeName: aws.String("Username"),
+            AttributeName: aws.String(constant.ListingTablePartitionKeyName),
             KeyType:       types.KeyTypeHash,
         }, {
-            AttributeName: aws.String("ListingId"),
+            AttributeName: aws.String(constant.ListingTableSortKeyName),
             KeyType:       types.KeyTypeRange,
         }},
 
         LocalSecondaryIndexes: []types.LocalSecondaryIndex{{
-            IndexName: aws.String(CategoryCountIndex),
+            IndexName: aws.String(constant.CategoryCountIndex),
             KeySchema: []types.KeySchemaElement{{
-                AttributeName: aws.String("Username"),
+                AttributeName: aws.String(constant.ListingTablePartitionKeyName),
                 KeyType:       types.KeyTypeHash,
             }, {
                 AttributeName: aws.String("CategoryCount"),
@@ -117,7 +83,7 @@ func (d DynamoDataAccess) CreateListingTable() (*types.TableDescription, error) 
 
         GlobalSecondaryIndexes: []types.GlobalSecondaryIndex{
             {
-                IndexName: aws.String(CategoryPriceIndex),
+                IndexName: aws.String(constant.CategoryPriceIndex),
                 KeySchema: []types.KeySchemaElement{{
                     AttributeName: aws.String("Category"),
                     KeyType:       types.KeyTypeHash,
@@ -131,7 +97,7 @@ func (d DynamoDataAccess) CreateListingTable() (*types.TableDescription, error) 
                 ProvisionedThroughput: provisionedThroughput,
             },
             {
-                IndexName: aws.String(CategoryCreatedAtIndex),
+                IndexName: aws.String(constant.CategoryCreatedAtIndex),
                 KeySchema: []types.KeySchemaElement{{
                     AttributeName: aws.String("Category"),
                     KeyType:       types.KeyTypeHash,
@@ -144,9 +110,23 @@ func (d DynamoDataAccess) CreateListingTable() (*types.TableDescription, error) 
                 },
                 ProvisionedThroughput: provisionedThroughput,
             },
+            {
+                IndexName: aws.String(constant.ListingIdIndex),
+                KeySchema: []types.KeySchemaElement{{
+                    AttributeName: aws.String(constant.ListingIdIndexPartitionKeyName),
+                    KeyType:       types.KeyTypeHash,
+                }, {
+                    AttributeName: aws.String(constant.ListingTablePartitionKeyName),
+                    KeyType:       types.KeyTypeRange,
+                }},
+                Projection: &types.Projection{
+                    ProjectionType: types.ProjectionTypeAll,
+                },
+                ProvisionedThroughput: provisionedThroughput,
+            },
         },
 
-        TableName:             aws.String(tableName),
+        TableName:             aws.String(constant.TableName),
         ProvisionedThroughput: provisionedThroughput,
     })
     if err != nil {
@@ -155,10 +135,20 @@ func (d DynamoDataAccess) CreateListingTable() (*types.TableDescription, error) 
 
     waiter := dynamodb.NewTableExistsWaiter(d.client)
     err = waiter.Wait(context.TODO(), &dynamodb.DescribeTableInput{
-        TableName: aws.String(tableName)}, 5*time.Minute)
+        TableName: aws.String(constant.TableName)}, 5*time.Minute)
     if err != nil {
         d.log.Fatalf("Got error waiting for table to exist: %s", err)
     }
 
     return table.TableDescription, nil
+}
+
+// DeleteTable deletes the DynamoDB Listing table and all its data
+func (d DynamoDataAccess) DeleteTable() error {
+    _, err := d.client.DeleteTable(context.TODO(), &dynamodb.DeleteTableInput{
+        TableName: aws.String(constant.TableName)})
+    if err != nil {
+        d.log.Errorf("Got error calling DeleteTable: %s", err)
+    }
+    return err
 }

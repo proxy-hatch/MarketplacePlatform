@@ -4,31 +4,49 @@ import (
     "bufio"
     "fmt"
     "go.uber.org/zap"
-    "marketplace-platform/pkg/data/dynamo"
+    "marketplace-platform/pkg/data/ddb"
+    "marketplace-platform/pkg/data/model"
     "marketplace-platform/pkg/logger"
+    "marketplace-platform/pkg/util"
     "os"
     "os/signal"
+    "strconv"
     "strings"
     "syscall"
 )
 
+var (
+    log = logger.NewLogger()
+    dao = ddb.NewDynamoDataAccess(log)
+)
+
 func main() {
-    log := logger.NewLogger()
-
-    dao := dynamo.NewDynamoDataAccess(log)
-
-    _, err := dao.CreateListingTable()
-    if err != nil {
-        log.Fatalf("Error creating Listing table: %v", err)
-        return
-    }
-
     exists, err := dao.ListingTableExists()
     if err != nil {
         log.Fatalf("Error checking if listing table exists: %v", err)
         return
     }
-    log.Info("Listing table exists: ", exists)
+    if exists {
+        log.Info("Listing table exists before initialization. Cleaning up")
+        err := dao.DeleteTable()
+        if err != nil {
+            log.Fatalf("Error deleting listing table: %v", err)
+            return
+        }
+    }
+
+    _, err = dao.CreateListingTable()
+    if err != nil {
+        log.Fatalf("Error creating Listing table: %v", err)
+        return
+    }
+
+    exists, err = dao.ListingTableExists()
+    if err != nil {
+        log.Fatalf("Error checking if listing table exists: %v", err)
+        return
+    }
+    log.Info("Empty Listing table initialized")
 
     // Create a channel to receive the SIGTERM signal
     c := make(chan os.Signal, 1)
@@ -46,37 +64,149 @@ func main() {
 
     for {
         // Print the prompt
-        fmt.Print("# ")
+        _, err = fmt.Fprint(os.Stderr, "# ")
+        if err != nil {
+            log.Errorf("Error printing prompt: %v", err)
+            return
+        }
 
-        // Read the input from the command line
-        input, _ := reader.ReadString('\n')
+        input, err := reader.ReadString('\n')
+        if err != nil {
+            log.Errorf("Error reading input: %v", err)
+            return
+        }
 
-        // Remove the newline character from the input
         input = strings.TrimSpace(input)
+        if input == "" {
+            continue
+        }
+        args := util.SplitArgs(input)
+        cmd := args[0]
+        args = args[1:]
 
-        // Split the input into arguments
-        args := strings.Split(input, " ")
-
-        // Check the command and execute the corresponding function
-        switch args[0] {
+        // Check the command and execute the corresponding function. Additional arguments ignored.
+        switch cmd {
         case "REGISTER":
-            // Execute the REGISTER command
-            register(args[1:])
+            if len(args) < 1 {
+                fmt.Println("Error - invalid number of arguments")
+                return
+            }
+            username := args[0]
+            register(username)
         case "CREATE_LISTING":
-            // Execute the CREATE_LISTING command
-            createListing(args[1:])
+            if len(args) < 5 {
+                fmt.Println("Error - invalid number of arguments")
+                return
+            }
+            username := args[0]
+            title := args[1]
+            description := args[2]
+            price := args[3]
+            category := args[4]
+
+            user, err := authUser(username)
+            if err != nil {
+                log.Errorf("Error authenticating user '%s': %v", username, err)
+                return
+            }
+            if user == nil {
+                fmt.Println("Error - unknown user")
+                return
+            }
+
+            createListing(username, title, description, price, category)
         case "GET_LISTING":
-            // Execute the GET_LISTING command
-            getListing(args[1:])
+            if len(args) < 2 {
+                fmt.Println("Error - invalid number of arguments")
+                return
+            }
+            username := args[0]
+            // convert listingId to int
+            listingId, err := strconv.Atoi(args[1])
+            if err != nil {
+                log.Errorf("Error converting listingId '%s' to int: %v", args[1], err)
+                fmt.Println("Error - invalid listingId")
+                return
+            }
+
+            user, err := authUser(username)
+            if err != nil {
+                log.Errorf("Error authenticating user '%s': %v", username, err)
+                fmt.Println("Error - internal server error")
+                return
+            }
+            if user == nil {
+                fmt.Println("Error - unknown user")
+                return
+            }
+
+            getListing(listingId)
         case "GET_CATEGORY":
-            // Execute the GET_CATEGORY command
-            getCategory(args[1:])
+            if len(args) < 2 || len(args) == 3 {
+                fmt.Println("Error - invalid number of arguments")
+                return
+            }
+            username := args[0]
+            category := args[1]
+
+            user, err := authUser(username)
+            if err != nil {
+                log.Errorf("Error authenticating user '%s': %v", username, err)
+                fmt.Println("Error - internal server error")
+                return
+            }
+            if user == nil {
+                fmt.Println("Error - unknown user")
+                return
+            }
+
+            if len(args) >= 4 {
+                sortKey := args[2]
+                sortOrder := args[3]
+                getCategoryWithSort(category, sortKey, sortOrder)
+            } else {
+                getCategory(category)
+            }
         case "GET_TOP_CATEGORY":
-            // Execute the GET_TOP_CATEGORY command
-            getTopCategory(args[1:])
+            if len(args) < 1 {
+                fmt.Println("Error - invalid number of arguments")
+                return
+            }
+            username := args[0]
+
+            user, err := authUser(username)
+            if err != nil {
+                log.Errorf("Error authenticating user '%s': %v", username, err)
+                fmt.Println("Error - internal server error")
+                return
+            }
+            if user == nil {
+                fmt.Println("Error - unknown user")
+                return
+            }
+
+            getTopCategory()
+
         case "DELETE_LISTING":
-            // Execute the DELETE_LISTING command
-            deleteListing(args[1:])
+            if len(args) < 2 {
+                fmt.Println("Error - invalid number of arguments")
+                return
+            }
+            username := args[0]
+            listingId := args[1]
+
+            user, err := authUser(username)
+            if err != nil {
+                log.Errorf("Error authenticating user '%s': %v", username, err)
+                fmt.Println("Error - internal server error")
+                return
+            }
+            if user == nil {
+                fmt.Println("Error - unknown user")
+                return
+            }
+
+            deleteListing(username, listingId)
         default:
             log.Error("Unknown command", zap.String("command", args[0]))
             fmt.Println("Unknown command", args[0])
@@ -84,27 +214,81 @@ func main() {
     }
 }
 
-// Define your functions for each command here
-func register(args []string) {
-    // Implement the REGISTER command here
+func register(username string) {
+    user, err := dao.PutUser(username)
+    if err != nil {
+        log.Errorf("Error registering user '%s': %v", username, err)
+        fmt.Println("Error - internal server error")
+        return
+    }
+
+    if user == nil {
+        fmt.Println("Error - user already existing")
+    } else {
+        fmt.Println("Success")
+    }
 }
 
-func createListing(args []string) {
-    // Implement the CREATE_LISTING command here
+func createListing(username string, title string, description string, price string, category string) {
+    // validate price is a float with 2 decimal places and convert to int
+    priceInt, err := util.ConvertPriceStringToInt(price)
+    if err != nil {
+        log.Errorf("Error converting price '%s' to int: %v", price, err)
+        fmt.Println("Error - invalid price")
+        return
+    }
+    listing, err := dao.PutListing(username, title, description, priceInt, category)
+    if err != nil {
+        log.Errorf("Error creating listing: %v", err)
+        fmt.Println("Error - internal server error")
+        return
+    }
+    if listing == nil {
+        fmt.Println("Error - listing already existing")
+    } else {
+        fmt.Println(listing.ListingId)
+    }
 }
 
-func getListing(args []string) {
-    // Implement the GET_LISTING command here
+func getListing(listingId int) {
+    listing, err := dao.GetListing(listingId)
+    if err != nil {
+        log.Errorf("Error getting listing '%s': %v", listingId, err)
+        fmt.Println("Error - internal server error")
+        return
+    }
+    if listing == nil {
+        fmt.Println("Error - not found")
+    } else {
+        fmt.Println(listing)
+    }
 }
 
-func getCategory(args []string) {
+func getCategory(category string) {
+
+}
+
+func getCategoryWithSort(category string, sortKey string, sortOrder string) {
     // Implement the GET_CATEGORY command here
 }
 
-func getTopCategory(args []string) {
+func getTopCategory() {
     // Implement the GET_TOP_CATEGORY command here
 }
 
-func deleteListing(args []string) {
+func deleteListing(username string, listingId string) {
     // Implement the DELETE_LISTING command here
+}
+
+// authUser determines if the user is authorized to perform the action
+// Returns the user if authorized, otherwise return nil
+func authUser(username string) (*model.User, error) {
+    user, err := dao.GetUser(username)
+    if err != nil {
+        return nil, err
+    }
+    if user == nil {
+        return nil, nil
+    }
+    return user, nil
 }
