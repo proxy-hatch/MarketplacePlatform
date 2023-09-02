@@ -3,7 +3,8 @@
 A basic marketplace platform which allows users to ‘buy’ and ‘sell’ items. Carousell offline assignment.
 
 ## Prerequisites
-Docker
+- Docker
+- Go 1.19 or above (provided by Docker)
 
 ## Running the application
 
