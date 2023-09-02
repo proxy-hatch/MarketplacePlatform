@@ -16,8 +16,8 @@ COPY pkg/ pkg/
 
 # Build the application
 ## dev env: arm64
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o go-cli-app cmd/main.go && chmod +x go-cli-app
-#RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o go-cli-app cmd/main.go && chmod +x go-cli-app
+#RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o go-cli-app cmd/main.go && chmod +x go-cli-app
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o go-cli-app cmd/main.go && chmod +x go-cli-app
 
 # Use the alpine image for a minimal final image
 FROM alpine:3.14
