@@ -46,16 +46,12 @@ func SplitArgs(input string) []string {
         if r == '\'' {
             inQuotes = !inQuotes
         } else if unicode.IsSpace(r) && !inQuotes {
-            if arg != "" {
-                args = append(args, arg)
-                arg = ""
-            }
+            args = append(args, arg)
+            arg = ""
         } else {
             arg += string(r)
         }
     }
-    if arg != "" {
-        args = append(args, arg)
-    }
+    args = append(args, arg)
     return args
 }

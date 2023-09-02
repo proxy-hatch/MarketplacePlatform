@@ -58,5 +58,5 @@ func (l Listing) DdbMarshalMap() (map[string]types.AttributeValue, error) {
 func (l Listing) String() string {
     // print listing in the format:
     // "<title>|<description>|<price>|<created_at>|<category>|<username>"
-    return l.Title + "|" + l.Description + "|" + strconv.Itoa(l.Price) + "|" + l.CreatedAt.String() + "|" + l.Category + "|" + l.Username
+    return l.Title + "|" + l.Description + "|" + strconv.Itoa(l.Price/100) + "|" + l.CreatedAt.Format("2006-01-02 15:04:05") + "|" + l.Category + "|" + l.Username
 }

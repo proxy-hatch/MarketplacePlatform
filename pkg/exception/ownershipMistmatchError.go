@@ -2,18 +2,18 @@ package exception
 
 import "fmt"
 
-type ListingDoesNotExistException struct {
+type OwnershipMismatchException struct {
     Context string
     Err     error
 }
 
-func NewListingDoesNotExistException(message string, err error) *ListingDoesNotExistException {
-    return &ListingDoesNotExistException{
+func NewOwnershipMismatchException(message string, err error) *OwnershipMismatchException {
+    return &OwnershipMismatchException{
         Context: message,
         Err:     err,
     }
 }
 
-func (e *ListingDoesNotExistException) Error() string {
-    return fmt.Sprintf("ListingDoesNotExistException: %s: %v", e.Context, e.Err)
+func (e *OwnershipMismatchException) Error() string {
+    return fmt.Sprintf("OwnershipMismatchException: %s: %v", e.Context, e.Err)
 }

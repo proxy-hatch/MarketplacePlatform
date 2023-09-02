@@ -2,18 +2,18 @@ package exception
 
 import "fmt"
 
-type UserAlreadyExistException struct {
+type ListingDoesNotExistException struct {
     Context string
     Err     error
 }
 
-func NewUserAlreadyExistException(message string, err error) *UserAlreadyExistException {
-    return &UserAlreadyExistException{
+func NewListingDoesNotExistException(message string, err error) *ListingDoesNotExistException {
+    return &ListingDoesNotExistException{
         Context: message,
         Err:     err,
     }
 }
 
-func (e *UserAlreadyExistException) Error() string {
-    return fmt.Sprintf("UserAlreadyExistException: %s: %v", e.Context, e.Err)
+func (e *ListingDoesNotExistException) Error() string {
+    return fmt.Sprintf("OwnershipMismatchException: %s: %v", e.Context, e.Err)
 }

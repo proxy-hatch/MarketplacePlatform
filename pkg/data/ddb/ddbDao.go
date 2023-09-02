@@ -13,6 +13,8 @@ import (
     "go.uber.org/zap"
     "marketplace-platform/pkg/constant"
     "marketplace-platform/pkg/data/model"
+    "marketplace-platform/pkg/data/model/enum"
+    "marketplace-platform/pkg/exception"
     "marketplace-platform/pkg/util"
     "strconv"
 )
@@ -103,12 +105,18 @@ func (d DynamoDataAccess) GetUser(username string) (*model.User, error) {
     }
     output, err := d.client.GetItem(context.TODO(), input)
     if err != nil {
+        d.log.Errorw("failed to get user", "username", username, "error", err)
         return nil, err
+    }
+
+    if output.Item == nil {
+        return nil, nil
     }
 
     var user model.User
     err = attributevalue.UnmarshalMap(output.Item, &user)
     if err != nil {
+        d.log.Errorf("failed to unmarshal user: %v", err)
         return nil, err
     }
 
@@ -199,7 +207,7 @@ func (d DynamoDataAccess) PutListing(
             },
             {
                 Update: &types.Update{
-                    Key:                       newCategoryMetricKey(category),
+                    Key:                       buildCategoryMetricKey(category),
                     ExpressionAttributeNames:  incrementCategoryCountExpr.Names(),
                     ExpressionAttributeValues: incrementCategoryCountExpr.Values(),
                     UpdateExpression:          incrementCategoryCountExpr.Update(),
@@ -214,16 +222,15 @@ func (d DynamoDataAccess) PutListing(
         if errors.As(err, &txCanceledErr) {
             for idx, reason := range txCanceledErr.CancellationReasons {
                 if *reason.Code != "None" {
-                    d.log.Debugf("Transaction cancelled at index %d with reason: %v", idx, reason)
+                    d.log.Errorf("Transaction cancelled at index %d with reason: %v", idx, reason)
                 }
                 if idx == 0 && *reason.Code == "ConditionalCheckFailed" {
                     return nil, nil
                 }
             }
         }
-        d.log.Debugf("TransactWriteItems failed with unhandled error: %v", err)
+        d.log.Errorf("TransactWriteItems failed with unhandled error: %v", err)
         return nil, err
-
     }
 
     return &listing, nil
@@ -267,7 +274,156 @@ func (d DynamoDataAccess) GetListing(listingId int) (*model.Listing, error) {
     return &listing, nil
 }
 
-func newCategoryMetricKey(category string) map[string]types.AttributeValue {
+// GetCategory retrieves all listings of a specified category and sorts them by price or creation time
+func (d DynamoDataAccess) GetCategory(category string, sortBy enum.SortBy, order enum.OrderBy) ([]model.Listing, error) {
+    indexName := constant.CategoryPriceIndex
+    if sortBy == enum.SortByCreatedAt {
+        indexName = constant.CategoryCreatedAtIndex
+    }
+
+    expr, err := expression.NewBuilder().
+        WithKeyCondition(expression.Key("Category").Equal(expression.Value(category))).
+        Build()
+    if err != nil {
+        return nil, err
+    }
+
+    input := &dynamodb.QueryInput{
+        KeyConditionExpression:    expr.KeyCondition(),
+        ExpressionAttributeNames:  expr.Names(),
+        ExpressionAttributeValues: expr.Values(),
+        TableName:                 aws.String(constant.TableName),
+        IndexName:                 aws.String(indexName),
+        ScanIndexForward:          aws.Bool(order == enum.OrderByAscending),
+    }
+    output, err := d.client.Query(context.TODO(), input)
+    if err != nil {
+        d.log.Errorf("failed to query category %s: %v", category, err)
+        return nil, err
+    }
+
+    var listings []model.Listing
+    err = attributevalue.UnmarshalListOfMaps(output.Items, &listings)
+    if err != nil {
+        d.log.Errorf("failed to unmarshal listings: %v", err)
+        return nil, err
+    }
+
+    return listings, nil
+}
+
+// GetTopCategory retrieves the category with the highest total number of listings
+func (d DynamoDataAccess) GetTopCategory() (string, error) {
+    expr, err := expression.NewBuilder().
+        WithKeyCondition(expression.Key(constant.ListingTablePartitionKeyName).Equal(expression.Value(constant.CategoryMetricRecordPartitionKey))).
+        Build()
+    if err != nil {
+        return "", err
+    }
+
+    // Create a QueryInput struct
+    input := &dynamodb.QueryInput{
+        KeyConditionExpression:    expr.KeyCondition(),
+        ExpressionAttributeNames:  expr.Names(),
+        ExpressionAttributeValues: expr.Values(),
+        TableName:                 aws.String(constant.TableName),
+        IndexName:                 aws.String(constant.CategoryCountIndex),
+        ScanIndexForward:          aws.Bool(false), // descending order
+        Limit:                     aws.Int32(1),
+    }
+    output, err := d.client.Query(context.TODO(), input)
+    if err != nil {
+        d.log.Errorf("failed to query top category: %v", err)
+        return "", err
+    }
+
+    d.log.Debugf("Query output items: %s", util.AnyToJsonString(output.Items))
+    var categoryMetric model.CategoryMetric
+    err = attributevalue.UnmarshalMap(output.Items[0], &categoryMetric)
+    if err != nil {
+        d.log.Errorf("failed to unmarshal category metric: %v", err)
+        return "", err
+    }
+
+    return categoryMetric.Category, nil
+}
+
+// DeleteListing deletes a listing and updates the CategoryMetric
+func (d DynamoDataAccess) DeleteListing(username string, listingId int) error {
+    // Get the listing to be deleted
+    listing, err := d.GetListing(listingId)
+    if err != nil {
+        d.log.Errorf("failed to get listing with listingId %d: %v", listingId, err)
+        return err
+    }
+
+    // Check if the listing exists
+    if listing == nil {
+        return exception.NewListingDoesNotExistException(fmt.Sprintf("listing with listingId %d does not exist", listingId), nil)
+    }
+
+    // Check if the username matches the owner of the listing
+    if listing.Username != username {
+        return exception.NewOwnershipMismatchException(fmt.Sprintf("listing with listingId %d is not owned by %s", listingId, username), nil)
+    }
+
+    // Prepare the TransactWriteItems input
+    deleteListingExpr, err := expression.NewBuilder().WithCondition(
+        expression.Name(constant.ListingTablePartitionKeyName).Equal(expression.Value(listingId)).And(
+            expression.Name(constant.ListingTableSortKeyName).Equal(expression.Value(username))),
+    ).Build()
+    if err != nil {
+        return err
+    }
+    decrementCategoryCountExpr, err := expression.NewBuilder().WithUpdate(expression.Add(expression.Name("CategoryCount"), expression.Value(-1))).Build()
+    if err != nil {
+        return err
+    }
+    input := &dynamodb.TransactWriteItemsInput{
+        TransactItems: []types.TransactWriteItem{
+            {
+                Delete: &types.Delete{
+                    Key: map[string]types.AttributeValue{
+                        constant.ListingTablePartitionKeyName: &types.AttributeValueMemberN{Value: strconv.Itoa(listingId)},
+                        constant.ListingTableSortKeyName:      &types.AttributeValueMemberS{Value: username},
+                    },
+                    TableName:                 aws.String(constant.TableName),
+                    ExpressionAttributeNames:  deleteListingExpr.Names(),
+                    ExpressionAttributeValues: deleteListingExpr.Values(),
+                    ConditionExpression:       deleteListingExpr.Condition(),
+                },
+            },
+            {
+                Update: &types.Update{
+                    Key:                       buildCategoryMetricKey(listing.Category),
+                    ExpressionAttributeNames:  decrementCategoryCountExpr.Names(),
+                    ExpressionAttributeValues: decrementCategoryCountExpr.Values(),
+                    UpdateExpression:          decrementCategoryCountExpr.Update(),
+                    TableName:                 aws.String(constant.TableName),
+                },
+            },
+        },
+    }
+
+    // Execute the transaction
+    _, err = d.client.TransactWriteItems(context.TODO(), input)
+    if err != nil {
+        var txCanceledErr *types.TransactionCanceledException
+        if errors.As(err, &txCanceledErr) {
+            for idx, reason := range txCanceledErr.CancellationReasons {
+                if *reason.Code != "None" {
+                    d.log.Errorf("Transaction cancelled at index %d with reason: %v", idx, reason)
+                }
+            }
+        }
+        d.log.Errorf("TransactWriteItems failed with unhandled error: %v", err)
+        return err
+    }
+
+    return nil
+}
+
+func buildCategoryMetricKey(category string) map[string]types.AttributeValue {
     return map[string]types.AttributeValue{
         constant.ListingTablePartitionKeyName: &types.AttributeValueMemberN{Value: strconv.Itoa(constant.CategoryMetricRecordPartitionKey)},
         constant.ListingTableSortKeyName:      &types.AttributeValueMemberS{Value: category},

@@ -16,6 +16,12 @@ Must ensure that DynamoDB local is running on port 8000.
 go run main.go
 ```
 
+## Running integration test
+
+```
+cd cmd
+go build -o main && go test
+```
 # Application Design
 
 ## Requirements
