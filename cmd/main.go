@@ -4,7 +4,6 @@ import (
     "bufio"
     "fmt"
     "github.com/go-playground/validator/v10"
-    "go.uber.org/zap"
     "marketplace-platform/pkg/data/ddb"
     "marketplace-platform/pkg/data/model"
     "marketplace-platform/pkg/data/model/enum"
@@ -241,8 +240,8 @@ func main() {
             deleteListing(username, listingId)
 
         default:
-            log.Error("Unknown command", zap.String("command", args[0]))
-            fmt.Println("Unknown command", args[0])
+            log.Error("Unknown command", cmd)
+            fmt.Println("Unknown command", cmd)
         }
     }
 }

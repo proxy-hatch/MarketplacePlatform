@@ -2,10 +2,13 @@
 
 A basic marketplace platform which allows users to ‘buy’ and ‘sell’ items. Carousell offline assignment.
 
+## Prerequisites
+Docker
+
 ## Running the application
 
 ```
-./run.sh
+./build.sh && ./run.sh
 ```
 
 ## Running without Docker

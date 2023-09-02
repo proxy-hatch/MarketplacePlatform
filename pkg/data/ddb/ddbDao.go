@@ -16,6 +16,7 @@ import (
     "marketplace-platform/pkg/data/model/enum"
     "marketplace-platform/pkg/exception"
     "marketplace-platform/pkg/util"
+    "os"
     "strconv"
 )
 
@@ -25,12 +26,20 @@ type DynamoDataAccess struct {
 }
 
 func NewDynamoDataAccess(log *zap.SugaredLogger) DynamoDataAccess {
-    // Create a custom configuration
+    // try to get the endpoint from the environment variable
+    var endpoint string
+    var endpointExists bool
+    endpoint, endpointExists = os.LookupEnv(constant.DynamoDbEndpointEnvKey)
+    if !endpointExists {
+        endpoint = "http://localhost:8000"
+    }
+    log.Debug("DynamoDB endpoint: " + endpoint)
+
     cfg, err := config.LoadDefaultConfig(context.TODO(),
         config.WithRegion("eu-west-1"),
         config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(
             func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-                return aws.Endpoint{URL: "http://localhost:8000",
+                return aws.Endpoint{URL: endpoint,
                     SigningRegion: "eu-west-1",
                 }, nil
             })),

@@ -15,4 +15,5 @@ var (
 
     ListingIdIndexPartitionKeyName = "ListingIdIndexAttribute"
     ListingIdIndexPartitionKey     = 1
+    DynamoDbEndpointEnvKey         = "DDB_ENDPOINT"
 )
