@@ -1,6 +1,6 @@
 # MarketplacePlatform
 
-A basic marketplace platform which allows users to ‘buy’ and ‘sell’ items. Carousell offline assignment.
+A basic marketplace platform which allows users to ‘buy’ and ‘sell’ items. [REDACTED COMPANY] offline assignment.
 
 ## Prerequisites
 - Docker
